@@ -42,7 +42,7 @@ def getValidIndexes(
     # min_num_skel - ignore trajectories that do not have at least this number of skeletons
     # min_dist - minimum distance explored by the blob to be consider a real
     # worm
-    
+
     trajectories_data = trajectories_data_f[trajectories_data_f[worm_index_type] > 0]
     valid_ind_str = 'is_good_skel' if 'is_good_skel' in trajectories_data else 'has_skeleton'
 
@@ -81,7 +81,7 @@ def getValidIndexes(
         good_row = (trajectories_data[worm_index_type].isin(good_traj_index)) \
             & (trajectories_data[valid_ind_str].values.astype(np.bool))
         good_skel_row = trajectories_data.loc[good_row, 'skeleton_id'].values
-        
+
         return (good_traj_index, good_skel_row)
 
 def _h_nodes2Array(skeletons_file, nodes4fit, valid_index=-1):
@@ -190,14 +190,14 @@ def _h_getPerpContourInd(
     dist2cnt2 = np.sum((contour_side2 - skeleton[skel_ind])**2, axis=1)
     d2 = np.abs(a * contour_side2[:, 0] - b * contour_side2[:, 1] + c)
     d2[dist2cnt2 > max_width_squared] = np.nan
-    
+
     try:
         cnt1_ind = np.nanargmin(d1)
         cnt2_ind = np.nanargmin(d2)
     except ValueError:
         cnt1_ind = np.nan
         cnt2_ind = np.nan
-    
+
     return cnt1_ind, cnt2_ind
 
 
@@ -218,7 +218,7 @@ def filterPossibleCoils(
         is_good_skel = trajectories_data['has_skeleton'].values.copy()
     else:
         is_good_skel = trajectories_data['is_good_skel'].values.copy()
-    
+
     tot_skeletons = len(is_good_skel)
     with tables.File(skeletons_file, 'r') as ske_file_id:
 
@@ -294,10 +294,10 @@ def filterPossibleCoils(
                 skeleton, -ht_limits, contour_side1, contour_side2, contour_width)
 
             if cnt_side1_ind_h > cnt_side1_ind_t or cnt_side2_ind_h > cnt_side2_ind_t or \
-            np.any(np.isnan([cnt_side1_ind_h, cnt_side2_ind_h, cnt_side1_ind_t, cnt_side2_ind_t])):    
+            np.any(np.isnan([cnt_side1_ind_h, cnt_side2_ind_h, cnt_side1_ind_t, cnt_side2_ind_t])):
                 is_good_skel[skel_id] = 0
                 continue
-            
+
             # if cnt_side1_ind_h>cnt_side1_ind_t:
             #    cnt_side1_ind_h, cnt_side1_ind_t = cnt_side1_ind_t, cnt_side1_ind_h
             # if cnt_side2_ind_h>cnt_side2_ind_t:
@@ -353,7 +353,7 @@ def filterPossibleCoils(
             if area_rest / (area_head + area_tail) > max_area_ratio:
                 is_good_skel[skel_id] = 0
                 continue
-    trajectories_data['is_good_skel'] = is_good_skel
+    trajectories_data['is_good_skel'] = is_good_skel.astype(np.uint8)
     save_modified_table(skeletons_file, trajectories_data, 'trajectories_data')
 
 
@@ -371,7 +371,7 @@ def _h_calAreaSignedArray(cnt_side1, cnt_side2):
         contour[:,:-1,0] * contour[:,1:,1] -
         contour[:,1:,0] * contour[:,:-1,1],
         axis=1)/ 2
-    
+
     assert signed_area.size == contour.shape[0]
     return signed_area
 
@@ -414,10 +414,10 @@ def filterByPopulationMorphology(skeletons_file, good_skel_row, critical_alpha=0
         print_flush(
             base_name +
             ' Filter Skeletons: Reading features for outlier identification.')
-        
+
         #add possible missing fields that were con calculated in older versions of the software
         _addMissingFields(skeletons_file)
-        
+
         # calculate classifier for the outliers
         nodes4fit = ['/skeleton_length', '/contour_area', '/width_midbody']
         worm_morph = _h_nodes2Array(skeletons_file, nodes4fit, -1)
@@ -456,6 +456,9 @@ def filterByPopulationMorphology(skeletons_file, good_skel_row, critical_alpha=0
         trajectories_data['skel_outliers_flag'] = outliers_flag
 
     # Save the new is_good_skel column
+    if trajectories_data['is_good_skel'].dtypes == bool:
+        trajectories_data['is_good_skel'] = trajectories_data[
+            'is_good_skel'].astype(np.uint8)
     save_modified_table(skeletons_file, trajectories_data, 'trajectories_data')
 
     print_flush(

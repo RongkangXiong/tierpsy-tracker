@@ -10,8 +10,8 @@ import os
 MODULE_NAME = "tierpsy"
 AUTHOR = 'Avelino Javer'
 AUTHOR_EMAIL = 'avelino.javer@imperial.ac.uk'
-URL = 'https://github.com/ver228/tierpsy-tracker'
-DOWNLOAD_URL = 'https://github.com/ver228/tierpsy-tracker'
+URL = 'https://github.com/Tierpsy/tierpsy-tracker'
+DOWNLOAD_URL = 'https://github.com/Tierpsy/tierpsy-tracker'
 DESCRIPTION = "tierpsy: Tierpsy Tracker Multi-Worm Tracker."
 exec(open(MODULE_NAME + '/version.py').read())
 VERSION = __version__
@@ -37,9 +37,9 @@ def _get_ext_modules():
   include_dirs = [numpy.get_include()]
   ext_modules = cythonize(os.path.join(cython_path, "*_cython.pyx"))
   ext_modules += cythonize(os.path.join(cython_path_e, "*.pyx"))
-  ext_modules += [Extension(_get_mod_path(name), 
-                            sources=_add_path(files), 
-                            include_dirs=include_dirs) 
+  ext_modules += [Extension(_get_mod_path(name),
+                            sources=_add_path(files),
+                            include_dirs=include_dirs)
   			   for name, files in ext_files.items()]
   return ext_modules
 
@@ -75,4 +75,3 @@ setup(name = MODULE_NAME,
           ]
       }
    )
- 

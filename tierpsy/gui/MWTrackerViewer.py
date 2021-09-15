@@ -14,7 +14,8 @@ from tierpsy.analysis.ske_create.helperIterROI import getWormROI
 from tierpsy.analysis.split_fov.FOVMultiWellsSplitter import FOVMultiWellsSplitter
 
 from tierpsy.gui.MWTrackerViewer_ui import Ui_MWTrackerViewer
-from tierpsy.gui.TrackerViewerAux import TrackerViewerAuxGUI
+from tierpsy.gui.TrackerViewerAux import (
+    TrackerViewerAuxGUI, BAD_SKEL_COLOURS, GOOD_SKEL_COLOURS)
 from tierpsy.gui.PlotFeatures import PlotFeatures
 
 from tierpsy.helper.misc import WLAB, save_modified_table
@@ -129,7 +130,7 @@ class WellsDrawer(TrackerViewerAuxGUI):
 #        super().keyPressEvent(event)
 
 
-class ContourDrawer(TrackerViewerAuxGUI):
+class FoodContourDrawer(TrackerViewerAuxGUI):
     '''
     Dummy class with the contour functions
     '''
@@ -619,7 +620,7 @@ class MarkersDrawer(FeatureReaderBase):
 
 
         self.drawT = {x: self.ui.comboBox_drawType.findText(x , flags=Qt.MatchContains)
-                                for x in ['boxes', 'traj']}
+                                for x in ['boxes', 'traj', 'skel']}
 
         self.showT = {x: self.ui.comboBox_showLabels.findText(x , flags=Qt.MatchContains)
                                 for x in ['hide', 'all', 'filter']}
@@ -747,6 +748,8 @@ class MarkersDrawer(FeatureReaderBase):
                 self.draw_boxes(painter, row_id, row_data, is_current_index)
             elif cb_ind == self.drawT['traj']:
                 self.draw_trajectories(painter, row_data, is_current_index)
+            elif cb_ind == self.drawT['skel']:
+                self.draw_skeletons(painter, row_id, row_data, is_current_index)
 
 
         painter.end()
@@ -830,6 +833,77 @@ class MarkersDrawer(FeatureReaderBase):
             offset = bb/2 - b_size
             painter.fillRect(x + offset, y + offset, b_size, b_size, QBrush(label_color))
 
+    def draw_skeletons(self, painter, roi_id, row_data, is_current_index):
+        if self.traj_worm_index_grouped is None:
+            return
+        if self.coordinates_fields is None:
+            return
+        worm_index = int(row_data[self.worm_index_type])
+        skel_id = int(row_data['skeleton_id'])
+        if self.coordinates_fields is None or skel_id < 0:
+            return
+
+        skel_dat = {}
+        with tables.File(self.skeletons_file, 'r') as skel_file_id:
+            # print(self.coordinates_group)
+            # print(self.coordinates_fields)
+            for ff, tt in self.coordinates_fields.items():
+                field = self.coordinates_group + ff
+                if field in skel_file_id:
+                    dat = skel_file_id.get_node(field)[skel_id]
+                    dat /= self.microns_per_pixel
+
+                    if self.stage_position_pix is not None and self.stage_position_pix.size > 0:
+                        #subtract stage motion if necessary
+                        dat -= self.stage_position_pix[self.frame_number]
+
+                    #dat[:, 0] = (dat[:, 0] - roi_corner[0] + 0.5) * c_ratio_x
+                    #dat[:, 1] = (dat[:, 1] - roi_corner[1] + 0.5) * c_ratio_y
+
+                else:
+                    dat = np.full((1,2), np.nan)
+
+                skel_dat[tt] = dat
+
+
+        if 'is_good_skel' in row_data and row_data['is_good_skel'] == 0:
+            skel_colors = BAD_SKEL_COLOURS
+        else:
+            skel_colors = GOOD_SKEL_COLOURS
+
+        qPlg = {}
+        for tt, dat in skel_dat.items():
+            qPlg[tt] = QPolygonF()
+            for p in dat:
+                #do not add point if it is nan
+                if p[0] == p[0]:
+                    qPlg[tt].append(QPointF(*p))
+
+        if not qPlg or len(qPlg['skeleton']) == 0:
+            #all nan skeleton nothing to do here...
+            return
+
+        pen = QPen()
+        pen.setWidth(0.5)
+
+        # pen.setColor(QColor(col))
+        # painter.setPen(pen)
+        # painter.drawPolyline(pol_v)
+
+        for k, pol_v in qPlg.items():
+            color = skel_colors[k]
+            pen.setColor(QColor(*color))
+            painter.setPen(pen)
+            painter.drawPolyline(pol_v)
+
+        pen.setColor(Qt.black)
+        painter.setBrush(Qt.white)
+        painter.setPen(pen)
+
+        radius = 2
+        painter.drawEllipse(qPlg['skeleton'][0], radius, radius)
+        painter.drawEllipse(QPointF(0,0), radius, radius)
+
 
 class PlotCommunicator(FeatureReaderBase, ROIManager):
     def __init__(self, ui=''):
@@ -872,7 +946,7 @@ class PlotCommunicator(FeatureReaderBase, ROIManager):
             self.plotter.plot(self.current_worm_index, self.feat_column)
 
 class MWTrackerViewer_GUI( MarkersDrawer, PlotCommunicator,
-    ContourDrawer, BlobLabeler, IntensityLabeler, TrajectoryEditor, WellsDrawer):
+    FoodContourDrawer, BlobLabeler, IntensityLabeler, TrajectoryEditor, WellsDrawer):
 
     def __init__(self, ui='', argv=''):
         if not ui:
@@ -962,7 +1036,8 @@ class MWTrackerViewer_GUI( MarkersDrawer, PlotCommunicator,
 
         #add this column if it does not exist
         if not 'has_skeleton' in self.trajectories_data:
-            self.trajectories_data['has_skeleton'] = self.trajectories_data['skeleton_id'] >= 0
+            self.trajectories_data['has_skeleton'] = (
+                self.trajectories_data['skeleton_id'] >= 0).astype(np.uint8)
 
         self.updateWormIndexTypeMenu()
         self.updateImage()
@@ -1093,7 +1168,7 @@ if __name__ == '__main__':
     #mask_file = '/Volumes/rescomp1/data/WormData/screenings/Pratheeban/First_Set/MaskedVideos/Old_Adult/16_07_22/W3_ELA_1.0_Ch1_22072016_131149.hdf5'
     #mask_file = '/Users/avelinojaver/Documents/GitHub/tierpsy-tracker/tests/data/AVI_VIDEOS/MaskedVideos/AVI_VIDEOS_1.hdf5'
 #    mask_file = '/Users/avelinojaver/Documents/GitHub/tierpsy-tracker/tests/data/WT2/MaskedVideos/WT2.hdf5'
-    mask_file = '/Users/lferiani/Hackathon/multiwell_tierpsy/12_FEAT_TIERPSY_forGUI/MaskedVideos/20191205/syngenta_screen_run1_bluelight_20191205_151104.22956805/metadata.hdf5'
+    mask_file = '/Users/lferiani/Hackathon/multiwell_tierpsy/12_FEAT_TIERPSY/MaskedVideos/20191205/syngenta_screen_run1_bluelight_20191205_151104.22956805/metadata.hdf5'
     main.updateVideoFile(mask_file)
 
     main.show()

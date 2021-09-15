@@ -13,7 +13,11 @@ import tables
 import os
 import numpy as np
 import cv2
-from keras.models import load_model
+import warnings
+
+with warnings.catch_warnings():
+    warnings.simplefilter(action='ignore', category=FutureWarning)
+    from keras.models import load_model
 
 from skimage.morphology import disk
 

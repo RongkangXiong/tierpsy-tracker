@@ -340,10 +340,6 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
 
         if is_bgnd_subtraction:
             bg_dataset = createImgGroup(mask_fid, "/bgnd", 1, vid.height, vid.width, is_expandable=False)
-            # because we only save the one background:
-            bg_dataset._v_attrs['save_interval'] = len(vid)
-            # except that if reading with ffmpeg, this could be not accurate.
-            # call it again after reading the whole video!
             bg_dataset[0,:,:] = img_fov
 
         if vid.dtype != np.uint8:
@@ -441,8 +437,8 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
         # for its number of frames. so set the save_interval again
         if is_bgnd_subtraction:
             # bg_dataset._v_attrs['save_interval'] = len(vid)
-            # so that didn't work. Either I have an off by one,
-            # or if the video is corrupted it's just safer to do:
+            # the above line is not accurate when using ffmpeg,
+            # it's just safer to do:
             bg_dataset._v_attrs['save_interval'] = mask_dataset.shape[0]
 
         # close the video
@@ -451,6 +447,8 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
     # save fovsplitting data
     if is_fov_tosplit:
         fovsplitter.write_fov_wells_to_file(masked_image_file)
+        if fovsplitter.is_dubious:
+            print(f'Check {masked_image_file} for plate alignment')
 
     read_and_save_timestamp(masked_image_file)
     print_flush(base_name + ' Compressed video done.')

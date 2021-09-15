@@ -161,7 +161,6 @@ class TrackerViewerAuxGUI(HDF5VideoPlayerGUI):
                         'skeleton':'skeleton',
                         'contour_side2':'contour_side2'
                     }
-
                 self.coordinates_fields = {k:v for k,v in self.coordinates_fields.items() if (self.coordinates_group + k) in skel_file_id}
 
             #read trajectories data, and other useful factors

@@ -32,3 +32,4 @@ tierpsy/analysis/ske_create/segWormPython/cython_files/curvspace.c
 tierpsy/analysis/ske_create/segWormPython/cython_files/circCurvature.c
 
 tierpsy/tests/data/*
+.vscode/

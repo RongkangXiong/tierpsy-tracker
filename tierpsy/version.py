@@ -1,12 +1,12 @@
 # # -*- coding: utf-8 -*-
-__version__ = '1.5.2-alpha'
+__version__ = '1.5.2'
 
 try:
     import os
     import subprocess
 
-    cwd = os.path.dirname(os.path.abspath(__file__)) 
-    command = ['git', 'rev-parse', 'HEAD']    
+    cwd = os.path.dirname(os.path.abspath(__file__))
+    command = ['git', 'rev-parse', 'HEAD']
     sha = subprocess.check_output(command, cwd=cwd, stderr = subprocess.DEVNULL).decode('ascii').strip()
     __version__ += '+' + sha[:7]
 
@@ -14,6 +14,52 @@ except Exception:
     pass
 
 '''
+
+1.5.2
+- Bug fixes:
+  * fixed GUI zoom sensitivity with touchpad
+  * fixed dead zenodo link for test data
+  * fixed bug affecting the detection of events
+    (motion mode, on/off food, turning)
+  * fixed bug where using the Viewer's feature to annotate worms as good/bad
+    a column of booleans would appear in the results hdf5 files
+    (causing incompatibility with downstream Mathematica analysis)
+  * fixed bug in normalisation of area features by worm length
+- Analysis:
+  * Added support for multiple wells in a field of view
+    (this will be made easier to taylor to other setups in the near future)
+  * New pytorch based neural network for worm/non-worm classification.
+    The included model might struggle to generalise to videos recorded in other
+    labs, but it is possible to provide Tierpsy with a custom-trained model.
+- Summarizer:
+  * Summarize features by time window (can specify multiple time windows)
+  * Filter trajectories by:
+    - average length of worm
+    - average width of worm
+    - trajectory's duration
+    - distance traveled
+  * Optionally shorten features names to get under 50 characters
+    (useful for MATLAB users)
+  * Optionally drop ventrally signed features (useful if dorsal/ventral unknown)
+  * Optionally select only a set of features
+    (choice among a few pre-made sets, or select by keyword)
+  * Summarizer writes to output(s) line-by-line as files are analysed
+  * `file_name` changed to `filename` in summarizer output
+  * Added a header to summarizer output with info about summarizer parameters
+  * Output files contain the number of skeletons that yielded the feature stats
+  * Added support to multiple wells in a field of view
+- Viewer:
+  * Added support to raw videos (imgstore format only)
+  * Choice of plotting skeletons and contours on the main window as well
+  * Added support to multiple wells in a field of view
+  * Wells can be marked as good/bad
+    (useful for downstream analysis outside of tierpsy)
+- Installation:
+  * Preferred installation route is using Docker
+    (extensive instructions provided)
+  * Installation from source is a good option on mac and linux
+
+
 1.5.1
 - Bug fixes
 - Improved documentation
@@ -69,13 +115,13 @@ except Exception:
 1.2.0
 - Major refactoring
 - Add capability of identifying worms using a pre-trained neural network (not activated by default).
-- Separated the creation of the control table in the skeletons file (trajectories_data) from the actually 
+- Separated the creation of the control table in the skeletons file (trajectories_data) from the actually
 skeletons calculation. The point SKEL_INIT now preceds SKEL_CREATION.
 
 1.1.1
 - Cumulative changes and bug corrections.
 
-1.1.0 
+1.1.0
 - Fish tracking (experimental) and fluorescence tracking.
 - major changes in the internal paralization, should make easier to add or remove steps on the tracking.
 - correct several bugs.

@@ -6,7 +6,8 @@ Created on Mon Jun  4 10:30:17 2018
 """
 from tierpsy.features.tierpsy_features.summary_stats import get_summary_stats
 from tierpsy.summary.helper import augment_data, add_trajectory_info
-from tierpsy.helper.params import read_fps
+from tierpsy.summary.filtering import filter_trajectories
+from tierpsy.helper.params import read_fps, read_microns_per_pixel
 from tierpsy.helper.misc import WLAB,print_flush
 from tierpsy.analysis.split_fov.helper import was_fov_split
 from tierpsy.analysis.split_fov.FOVMultiWellsSplitter import FOVMultiWellsSplitter
@@ -20,52 +21,156 @@ def time_to_frame_nb(time_windows,time_units,fps,timestamp,fname):
     Converts the time windows to units of frame numbers (if they were defined in seconds).
     It also defines the end frame of a window, if the index is set to -1 (end).
     """
+    from copy import deepcopy
+
     if timestamp.empty:
         return
 
-    from copy import deepcopy
     time_windows_frames = deepcopy(time_windows)
+
     if time_units == 'seconds':
-        assert fps!=-1
-        for iwin in range(len(time_windows_frames)):
-            for ilim in range(2):
-                if time_windows_frames[iwin][ilim]!=-1:
-                    time_windows_frames[iwin][ilim] = round(time_windows_frames[iwin][ilim]*fps)
+        assert fps!=-1, 'Cannot convert time windows to frame numbers. Frames per second ratio not known.'
+        for iwin, win in enumerate(time_windows_frames):
+            for iinterval in range(len(win)):
+                for ilim in range(2):
+                    if time_windows_frames[iwin][iinterval][ilim]!=-1:
+                        time_windows_frames[iwin][iinterval][ilim] = \
+                            round(time_windows_frames[iwin][iinterval][ilim]*fps)
 
     last_frame = timestamp.sort_values().iloc[-1]
-    for iwin in range(len(time_windows_frames)):
-        # If a window ends with -1, replace with the frame number of the last frame (or the start frame of the window+1 if window out of bounds)
-        if time_windows_frames[iwin][1]==-1:
-            time_windows_frames[iwin][1] = max(last_frame+1,time_windows_frames[iwin][0])
+    for iwin, win in enumerate(time_windows_frames):
+        for iinterval in range(len(win)):
+            # If a window ends with -1, replace with the frame number of the
+            # last frame (or the start frame of the window+1 if window out of bounds)
+            if time_windows_frames[iwin][iinterval][1]==-1:
+                time_windows_frames[iwin][iinterval][1] = \
+                    max(last_frame+1, time_windows_frames[iwin][iinterval][0])
 
-        # If a window is out of bounds, print warning
-        if time_windows_frames[iwin][0]>last_frame:
-            print_flush('Warning: The start time of window {}/{} is out of bounds of file \'{}\'.'.format(iwin+1,len(time_windows_frames),fname))
+            # If a window is out of bounds, print warning
+            if time_windows_frames[iwin][iinterval][0]>last_frame:
+                print_flush(
+                    'Warning: The start time of interval '+
+                    '{}/{} '.format(iinterval+1, len(win)) +
+                    'of window {} '.format(iwin) +
+                    'is out of bounds of file \'{}\'.'.format(fname))
 
     return time_windows_frames
 
-def no_fps(time_units,fps):
-    if time_units=='seconds' and fps==-1:
-        print_flush(
-                    """
-                    Warning: The time windows were defined in seconds, but fps for file \'{}\' is unknown.
-                    Define time windows in frame numbers instead.
-                    """.format(fname)
-                    )
-        return True
+def no_attr_flush(attr, fname):
+    if attr=='fps':
+        out = ['seconds', 'frames_per_second', fname, 'frame numbers']
+    elif attr=='mpp':
+        out = ['microns', 'microns_per_pixel', fname, 'pixels']
+
+    print_flush(
+        """
+        Warning: some of the summarizer input were given in {0}, but the {1}
+        ratio for file \'{2}\' is unknown. Give input in {3} instead.
+        """.format(*out)
+        )
+    return
+
+def _no_fps(time_units, fps, fname):
+    if fps==-1:
+        if time_units=='seconds':
+            no_attr_flush('fps', fname)
+            return True
+
+    return False
+
+def _match_units(filter_params, fps, fname):
+    """
+    author: EM
+    The filtering thresholds must match the timeseries units. If the right
+    conversion is not possible, then check_ok is False, and the feature
+    summaries will not be calculated for this file.
+
+    """
+    from copy import deepcopy
+
+    if filter_params is None:
+        return filter_params, True
+
+    all_units = filter_params['units']+[filter_params['time_units']]
+
+    cfilter_params = deepcopy(filter_params)
+
+    if fps==-1:
+        # In this case, all time-related timeseries will be in frames.
+        # If thresholds have been defined in seconds there is no way to convert.
+        if 'seconds' in all_units:
+            no_attr_flush('fps', fname)
+            return cfilter_params, False
+
     else:
-        return False
+        # In this case, all time-related timeseries will be in seconds.
+
+        # We always want the time_units for traj_length in frames
+        if filter_params['time_units']=='seconds' and \
+            filter_params['min_traj_length'] is not None:
+                cfilter_params['min_traj_length'] = \
+                    filter_params['min_traj_length']*fps
+
+        # If the timeseries therholds are defined in seconds, no conversion is
+        # necessary
+        # If the timeseries thresholds are defined in frames, we need to convert
+        # to seconds
+        if 'frame_numbers' in filter_params['units']:
+            ids = [i for i,x in enumerate(filter_params['units']) if x=='frame_numbers']
+            for i in ids:
+                if filter_params['min_thresholds'][i] is not None:
+                    cfilter_params['min_thresholds'][i]= \
+                        filter_params['min_thresholds'][i]/fps
+                if filter_params['max_thresholds'][i] is not None:
+                    cfilter_params['max_thresholds'][i]= \
+                        filter_params['max_thresholds'][i]/fps
+
+    mpp = read_microns_per_pixel(fname)
+
+    if mpp==-1:
+        # In this case, all distance-related timeseries will be in pixels.
+        # If thresholds have been defined in microns there is no way to convert.
+        if 'microns' in all_units:
+            no_attr_flush('mpp', fname)
+            return cfilter_params, False
+    else:
+        # In this case, all distance-related timeseries will be in microns.
+        # If the timeseries threholds are defined in micorns, no conversion is
+        # necessary
+        # If the timeseries thresholds are defined in pixels, we need to convert
+        # to microns
+        if filter_params['distance_units']=='pixels' and \
+            filter_params['min_distance_traveled'] is not None:
+                cfilter_params['min_distance_traveled'] = \
+                    filter_params['min_distance_traveled']*mpp
+        if 'pixels' in filter_params['units']:
+            ids = [i for i,x in enumerate(filter_params['units']) if x=='pixels']
+            for i in ids:
+                if filter_params['min_thresholds'][i] is not None:
+                    cfilter_params['min_thresholds'][i]= \
+                        filter_params['min_thresholds'][i]*mpp
+                if filter_params['max_thresholds'][i] is not None:
+                    cfilter_params['max_thresholds'][i]= \
+                        filter_params['max_thresholds'][i]*mpp
+
+    return cfilter_params, True
+
 #%%
-def read_data(fname, time_windows, time_units, fps, is_manual_index):
+def read_data(fname, filter_params, time_windows, time_units, fps, is_manual_index):
     """
     Reads the timeseries_data and the blob_features for a given file within every time window.
     return:
         timeseries_data_list: list of timeseries_data for each time window (length of lists = number of windows)
         blob_features_list: list of blob_features for each time window (length of lists = number of windows)
     """
+    import numpy as np
     # EM: If time_units=seconds and fps is not defined, then return None with warning of no fps.
     #     Make this check here, to avoid wasting time reading the file
-    if no_fps(time_units,fps):
+    if _no_fps(time_units, fps, fname):
+        return
+
+    cfilter_params, check_ok = _match_units(filter_params, fps, fname)
+    if not check_ok:
         return
 
     with pd.HDFStore(fname, 'r') as fid:
@@ -93,32 +198,52 @@ def read_data(fname, time_windows, time_units, fps, is_manual_index):
         if timeseries_data.empty:
             #no data, nothing to do here
             return
-
         # convert time windows to frame numbers for the given file
         time_windows_frames = time_to_frame_nb(
             time_windows, time_units, fps, timeseries_data['timestamp'], fname
             )
 
-        #extract the timeseries_data and blob_features corresponding to each
-        #time window and store them in a list (length of lists = number of windows)
+        # EM: Filter trajectories
+        if cfilter_params is not None:
+            timeseries_data, blob_features = \
+                filter_trajectories(timeseries_data, blob_features, **cfilter_params)
+
+        if timeseries_data.empty:
+            #no data, nothing to do here
+            return
+
+        # EM: extract the timeseries_data and blob_features corresponding to each
+        # time window and store them in a list (length of lists = number of windows)
         timeseries_data_list = []
         blob_features_list = []
         for window in time_windows_frames:
-            in_window = (timeseries_data['timestamp']>=window[0]) & (timeseries_data['timestamp']<window[1])
-            timeseries_data_list.append(timeseries_data.iloc[in_window.values,:].reset_index(drop=True))
-            blob_features_list.append(blob_features.iloc[in_window.values].reset_index(drop=True))
+            in_window = []
+            for interval in window:
+                in_interval = (timeseries_data['timestamp']>=interval[0]) & \
+                              (timeseries_data['timestamp']<interval[1])
+                in_window.append(in_interval.values)
+            in_window = np.any(in_window, axis=0)
+            timeseries_data_list.append(timeseries_data.loc[in_window, :].reset_index(drop=True))
+            blob_features_list.append(blob_features.loc[in_window].reset_index(drop=True))
 
     return timeseries_data_list, blob_features_list
+
+def count_skeletons(timeseries):
+    cols = [col for col in timeseries.columns if col.startswith('eigen')]
+    return (~timeseries[cols].isna().any(axis=1)).sum()
+
 #%%
 def tierpsy_plate_summary(
-        fname, time_windows, time_units, only_abs_ventral=False,
-        selected_feat=None, is_manual_index=False, delta_time=1/3):
+        fname, filter_params, time_windows, time_units,
+        only_abs_ventral=False, selected_feat=None,
+        is_manual_index=False, delta_time=1/3):
     """
     Calculate the plate summaries for a given file fname, within a given time window
     (units of start time and end time are in frame numbers).
     """
     fps = read_fps(fname)
-    data_in = read_data(fname, time_windows, time_units, fps, is_manual_index)
+    data_in = read_data(
+        fname, filter_params, time_windows, time_units, fps, is_manual_index)
 
     # if manual annotation was chosen and the trajectories_data does not contain
     # worm_index_manual, then data_in is None
@@ -130,7 +255,7 @@ def tierpsy_plate_summary(
 
     # was the fov split in wells? only use the first window to detect that,
     # and to extract the list of well names
-    is_fov_tosplit = was_fov_split(timeseries_data[0])
+    is_fov_tosplit = was_fov_split(fname)
 #    is_fov_tosplit = False
 
     if is_fov_tosplit:
@@ -147,6 +272,7 @@ def tierpsy_plate_summary(
                 only_abs_ventral=only_abs_ventral,
                 selected_feat=selected_feat
                 )
+            plate_feats['n_skeletons'] = count_skeletons(timeseries_data[iwin])
             plate_feats_list.append(pd.DataFrame(plate_feats).T)
         else:
             # get list of well names in this time window
@@ -164,6 +290,7 @@ def tierpsy_plate_summary(
                     only_abs_ventral=only_abs_ventral,
                     selected_feat=selected_feat
                     )
+                well_feats['n_skeletons'] = count_skeletons(timeseries_data[iwin][idx_well])
                 # first prepend the well_name_s to the well_feats series,
                 # then transpose it so it is a single-row dataframe,
                 # and append it to the well_feats_list
@@ -186,19 +313,21 @@ def tierpsy_plate_summary(
 
 
 def tierpsy_trajectories_summary(
-        fname, time_windows, time_units, only_abs_ventral=False,
-        selected_feat=None, is_manual_index=False, delta_time=1/3):
+        fname, filter_params, time_windows, time_units,
+        only_abs_ventral=False, selected_feat=None,
+        is_manual_index=False, delta_time=1/3):
     """
     Calculate the trajectory summaries for a given file fname, within a given time window
     (units of start time and end time are in frame numbers).
     """
     fps = read_fps(fname)
-    data_in = read_data(fname, time_windows, time_units, fps, is_manual_index)
+    data_in = read_data(
+        fname, filter_params, time_windows, time_units, fps, is_manual_index)
     if data_in is None:
         return [pd.DataFrame() for iwin in range(len(time_windows))]
     timeseries_data, blob_features = data_in
 
-    is_fov_tosplit = was_fov_split(timeseries_data[0])
+    is_fov_tosplit = was_fov_split(fname)
     #    is_fov_tosplit = False
     if is_fov_tosplit:
         fovsplitter = FOVMultiWellsSplitter(fname)
@@ -226,8 +355,11 @@ def tierpsy_trajectories_summary(
                     only_abs_ventral=only_abs_ventral,
                     selected_feat=selected_feat
                     ) # returns empty dataframe when w_ts_data is empty
+                worm_feats['n_skeletons'] = count_skeletons(w_ts_data)
                 worm_feats = pd.DataFrame(worm_feats).T
-                worm_feats = add_trajectory_info(worm_feats, w_ind, w_ts_data, fps)
+                worm_feats = add_trajectory_info(
+                    worm_feats, w_ind, w_ts_data, fps,
+                    is_fov_tosplit=is_fov_tosplit)
 
                 all_summary.append(worm_feats)
             # concatenate all trajectories in given time window into one dataframe
@@ -246,12 +378,14 @@ def tierpsy_trajectories_summary(
 #%%
 
 def tierpsy_plate_summary_augmented(
-        fname, time_windows, time_units, only_abs_ventral = False,
-        selected_feat = None, is_manual_index = False, delta_time = 1/3,
+        fname, filter_params, time_windows, time_units,
+        only_abs_ventral = False, selected_feat = None,
+        is_manual_index = False, delta_time = 1/3,
         **fold_args):
 
     fps = read_fps(fname)
-    data_in = read_data(fname, time_windows, time_units, fps, is_manual_index)
+    data_in = read_data(
+        fname, filter_params, time_windows, time_units, fps, is_manual_index)
     if data_in is None:
         return [pd.DataFrame() for iwin in range(len(time_windows))]
     timeseries_data, blob_features = data_in
@@ -280,6 +414,7 @@ def tierpsy_plate_summary_augmented(
                     selected_feat=selected_feat
                     )
 
+                plate_feats['n_skeletons'] = count_skeletons(timeseries_data_r)
                 plate_feats = pd.DataFrame(plate_feats).T
                 plate_feats.insert(0, 'i_fold', i_fold)
 
@@ -296,10 +431,10 @@ def tierpsy_plate_summary_augmented(
 
 if __name__ == '__main__':
 
-#    fname='/Users/em812/Documents/OneDrive - Imperial College London/Eleni/Tierpsy_GUI/test_results_2/Set4_Ch3_18012019_130019_featuresN.hdf5'
-#    fname='/Users/lferiani/Desktop/Data_FOVsplitter/short/Results/drugexperiment_1hr30minexposure_set1_bluelight_20190722_173404.22436248/metadata_featuresN.hdf5'
-#    fname='/Users/lferiani/Desktop/Data_FOVsplitter/evgeny/Results/20190808_subset/evgeny_plate01_r1_20190808_114758.22956805/metadata_featuresN.hdf5'
-    fname = '/Users/lferiani/Hackathon/multiwell_tierpsy/12_FEAT_TIERPSY/Results/20191205/syngenta_screen_run1_bluelight_20191205_151104.22956805/metadata_featuresN.hdf5'
+    fname='/Users/em812/Data/Tierpsy_GUI/test_results_2/N2_worms10_CSAA016712_1_Set3_Pos4_Ch2_14072017_184843_featuresN.hdf5'
+    # fname='/Users/lferiani/Desktop/Data_FOVsplitter/short/Results/drugexperiment_1hr30minexposure_set1_bluelight_20190722_173404.22436248/metadata_featuresN.hdf5'
+    # fname='/Users/lferiani/Desktop/Data_FOVsplitter/evgeny/Results/20190808_subset/evgeny_plate01_r1_20190808_114758.22956805/metadata_featuresN.hdf5'
+    # fname = '/Users/lferiani/Hackathon/multiwell_tierpsy/12_FEAT_TIERPSY/Results/20191205/syngenta_screen_run1_bluelight_20191205_151104.22956805/metadata_featuresN.hdf5'
     is_manual_index = False
 
 
@@ -309,12 +444,21 @@ if __name__ == '__main__':
                  time_sample_seconds = 10*60
                  )
 
-#    time_windows = [[0,10000],[10000,15000],[10000000,-1]]
-#    time_units = 'frameNb'
+    filter_params = None
 
-#    time_windows = [[0,60],[120,-1],[10000000,-1]]
-    time_windows = [[0,60],[10000000,-1]]
-    time_units = 'seconds'
-#    summary = tierpsy_plate_summary(fname,time_windows,time_units)
-    summary = tierpsy_trajectories_summary(fname,time_windows,time_units)
-#    summary = tierpsy_plate_summary_augmented(fname,time_windows,time_units,is_manual_index=False,delta_time=1/3,**fold_args)
+    # time_windows = [[0,10000],[10000,15000],[10000000,-1]]
+    # time_units = 'frameNb'
+
+    # time_windows = [[0,60],[120,-1],[10000000,-1]]
+    # time_windows = [[[0,60]], [[0,120]], [[150,200], [250,300]], [[10000000,-1]]]
+    # time_units = 'seconds'
+    time_windows = [[[0,60]], [[0,120]], [[150,200], [250,300]], [[10000000,-1]]]
+    time_units = 'frame_numbers'
+
+    fps = 25
+
+    timeseries_list, blob_list = read_data(fname, filter_params, time_windows, time_units, fps, is_manual_index)
+    # summary = tierpsy_plate_summary(fname,time_windows,time_units)
+    # summary = tierpsy_trajectories_summary(fname,time_windows,time_units)
+    # summary = tierpsy_plate_summary_augmented(fname,time_windows,time_units,is_manual_index=False,delta_time=1/3,**fold_args)
+
