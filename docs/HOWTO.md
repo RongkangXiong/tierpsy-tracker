@@ -4,7 +4,7 @@ Example files can be found [here](https://zenodo.org/record/3837679/files/test_d
 
 You can analyze the videos using the [Batch Processing Multiple Files](#batch-processing-multiple-files) App. The videos require different analysis parameters since they belong to different setups, therefore they cannot be processed together.
 
-For the multiworm video the `Parameters File` must be set to `MULTIWORM_TIERPSY.json` and the `File Pattern to Include` as `*.mov` as shown below:
+For the singleworm video the `Parameters File` must be set to `MULTIWORM_TIERPSY.json` and the `File Pattern to Include` as `*.mov` as shown below:
 
 <img width="450" alt="screen shot 2018-06-11 at 12 47 16" src="https://user-images.githubusercontent.com/8364368/41229893-9c0ab892-6d75-11e8-97d8-553bae8b4ea8.png">
 
